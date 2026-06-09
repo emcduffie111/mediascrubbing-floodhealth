@@ -28,16 +28,17 @@
 #       ./download_reddit_data.sh --help
 #
 # A NOTE ON DATES (-a / -b)
-#   The "after" (-a) and "before" (-b) options are dates, but they must be
-#   given as a Unix timestamp in MILLISECONDS (the number of milliseconds
-#   since Jan 1, 1970). That is just how the archive's API expects dates.
+#   The "after" (-a) and "before" (-b) options accept either format:
 #
-#   The easiest way to get one: visit https://www.epochconverter.com,
-#   pick your date, copy the timestamp, and add "000" to the end to turn
-#   seconds into milliseconds.
+#     * A normal calendar date as MM-DD-YYYY, e.g.  -a 09-24-2024
+#       (this is the easy one — just type the month, day, and year.)
 #
-#   Don't worry about memorizing this — when the script runs it prints the
-#   date range back to you in plain English so you can confirm it's correct.
+#     * A Unix timestamp in MILLISECONDS, e.g.      -a 1727222400000
+#       (only needed if you already have one; the script converts the
+#        MM-DD-YYYY form into this automatically.)
+#
+#   When the script runs it prints the date range back to you in plain
+#   English so you can confirm it picked the right dates.
 #
 # REQUIREMENTS
 #   - curl (pre-installed on macOS and most Linux systems)
@@ -48,12 +49,40 @@
 set -e
 
 # ----------------------------------------------------------------------------
+# Helper: turn a date into the millisecond timestamp the API requires.
+#   * "MM-DD-YYYY" (e.g. 09-24-2024) is converted to milliseconds.
+#   * A value that is already all digits is treated as a ready-made timestamp
+#     and passed straight through unchanged.
+# Anything else is rejected with a clear error message.
+# ----------------------------------------------------------------------------
+to_ms() {
+  local value="$1"
+  if [[ "$value" =~ ^[0-9]{2}-[0-9]{2}-[0-9]{4}$ ]]; then
+    # Convert MM-DD-YYYY -> seconds (macOS/BSD date), then to milliseconds. We
+    # pin the time to 00:00:00 so the day always starts at midnight; otherwise
+    # macOS's `date -j` fills in the current time of day.
+    local seconds
+    seconds=$(date -j -f "%m-%d-%Y %H:%M:%S" "$value 00:00:00" "+%s" 2>/dev/null) || {
+      echo "Error: '$value' is not a valid MM-DD-YYYY date." >&2
+      exit 1
+    }
+    echo "$((seconds * 1000))"
+  elif [[ "$value" =~ ^[0-9]+$ ]]; then
+    # Already a millisecond timestamp.
+    echo "$value"
+  else
+    echo "Error: date '$value' must be MM-DD-YYYY (e.g. 09-24-2024) or a ms timestamp." >&2
+    exit 1
+  fi
+}
+
+# ----------------------------------------------------------------------------
 # Default values — used when you don't pass the matching option on the command
 # line. Edit these if you want different defaults every time you run the script.
 # ----------------------------------------------------------------------------
 SUBREDDIT="northcarolina"  # which subreddit to download from (no "r/" prefix)
-AFTER="1727222400000"      # start of date range, in ms — Sept 24, 2024
-BEFORE="1780272000000"     # end of date range, in ms   — Sept 24, 2025
+AFTER="09-24-2024"         # start of date range (MM-DD-YYYY or a ms timestamp)
+BEFORE="09-24-2025"        # end of date range   (MM-DD-YYYY or a ms timestamp)
 TYPE="comments"            # what to download: "comments" or "posts"
 LIMIT="auto"               # how many results to fetch ("auto" lets API decide)
 OUTPUT_FILE=""             # file name to save to; empty means print to the screen
@@ -100,8 +129,8 @@ while [[ $# -gt 0 ]]; do
       echo ""
       echo "Options:"
       echo "  -s, --subreddit SUBREDDIT    Subreddit name (default: northcarolina)"
-      echo "  -a, --after TIMESTAMP        Start timestamp in ms (default: 1727222400000)"
-      echo "  -b, --before TIMESTAMP       End timestamp in ms (default: 1780272000000)"
+      echo "  -a, --after DATE             Start date as MM-DD-YYYY or ms (default: 09-24-2024)"
+      echo "  -b, --before DATE            End date as MM-DD-YYYY or ms (default: 09-24-2025)"
       echo "  -t, --type TYPE              Data type: comments or posts (default: comments)"
       echo "  -l, --limit LIMIT            Result limit (default: auto)"
       echo "  -o, --output FILE            Output file name (default: prints to stdout)"
@@ -129,6 +158,11 @@ if [[ "$TYPE" != "comments" && "$TYPE" != "posts" ]]; then
   echo "Error: Type must be 'comments' or 'posts', got: $TYPE"
   exit 1
 fi
+
+# Convert the date options into the millisecond timestamps the API needs. This
+# accepts either MM-DD-YYYY or an existing ms timestamp (see to_ms above).
+AFTER=$(to_ms "$AFTER")
+BEFORE=$(to_ms "$BEFORE")
 
 # ----------------------------------------------------------------------------
 # Work out where to save the file, based on -o (file name) and -d (directory).
