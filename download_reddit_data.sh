@@ -56,7 +56,8 @@ AFTER="1727222400000"      # start of date range, in ms — Sept 24, 2024
 BEFORE="1780272000000"     # end of date range, in ms   — Sept 24, 2025
 TYPE="comments"            # what to download: "comments" or "posts"
 LIMIT="auto"               # how many results to fetch ("auto" lets API decide)
-OUTPUT_FILE=""             # file to save to; empty means print to the screen
+OUTPUT_FILE=""             # file name to save to; empty means print to the screen
+DIRECTORY=""               # folder to save into; created automatically if missing
 
 # ----------------------------------------------------------------------------
 # Read the options the user typed (e.g. -s AskReddit). Each option below has a
@@ -88,6 +89,10 @@ while [[ $# -gt 0 ]]; do
       OUTPUT_FILE="$2"
       shift 2
       ;;
+    -d|--directory)
+      DIRECTORY="$2"
+      shift 2
+      ;;
     -h|--help)
       echo "Download Reddit data from arctic-shift API"
       echo ""
@@ -99,12 +104,16 @@ while [[ $# -gt 0 ]]; do
       echo "  -b, --before TIMESTAMP       End timestamp in ms (default: 1780272000000)"
       echo "  -t, --type TYPE              Data type: comments or posts (default: comments)"
       echo "  -l, --limit LIMIT            Result limit (default: auto)"
-      echo "  -o, --output FILE            Output file (default: prints to stdout)"
+      echo "  -o, --output FILE            Output file name (default: prints to stdout)"
+      echo "  -d, --directory DIR          Folder to save into; created if missing."
+      echo "                               Auto-names the file if -o is not given."
       echo "  -h, --help                   Show this help message"
       echo ""
       echo "Examples:"
       echo "  $0 -s AskReddit -t comments -o comments.json"
       echo "  $0 -s politics -a 1700000000000 -b 1710000000000 -t posts"
+      echo "  $0 -s AskReddit -d data            # saves data/AskReddit_comments.json"
+      echo "  $0 -s AskReddit -d data -o q1.json # saves data/q1.json"
       exit 0
       ;;
     *)
@@ -119,6 +128,24 @@ done
 if [[ "$TYPE" != "comments" && "$TYPE" != "posts" ]]; then
   echo "Error: Type must be 'comments' or 'posts', got: $TYPE"
   exit 1
+fi
+
+# ----------------------------------------------------------------------------
+# Work out where to save the file, based on -o (file name) and -d (directory).
+#   * If a directory was given, create it (and any parent folders) if needed.
+#   * If no file name was given but a directory was, auto-name the file using
+#     the subreddit and type, e.g. "AskReddit_comments.json".
+#   * We only keep the file name part of -o (basename), so the -d folder always
+#     decides the location and the two can't disagree.
+# The result is stored back in OUTPUT_FILE, which the curl step below uses.
+# ----------------------------------------------------------------------------
+if [ -n "$DIRECTORY" ]; then
+  mkdir -p "$DIRECTORY"
+  if [ -n "$OUTPUT_FILE" ]; then
+    OUTPUT_FILE="${DIRECTORY%/}/$(basename "$OUTPUT_FILE")"
+  else
+    OUTPUT_FILE="${DIRECTORY%/}/${SUBREDDIT}_${TYPE}.json"
+  fi
 fi
 
 # The API has a separate address ("endpoint") for comments vs posts, which
