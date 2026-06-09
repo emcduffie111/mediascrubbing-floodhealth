@@ -5,3 +5,7 @@ dependencies:
   - ipywidgets
   - ipykernel
   - jupyterlab
+  - openpyxl
+  - plotly
+  - networkx
+  - scikit-learn
