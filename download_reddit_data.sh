@@ -49,6 +49,27 @@
 set -e
 
 # ----------------------------------------------------------------------------
+# Linux and macOS ship two different `date` commands that take different flags.
+# Detect which one we have once, so the helpers below can use the right syntax.
+#   * GNU date (Linux):  has --version, converts with  date -d "..."
+#   * BSD date (macOS):  no --version, converts with   date -j -f "..."
+# ----------------------------------------------------------------------------
+if date --version >/dev/null 2>&1; then
+  DATE_FLAVOR="gnu"
+else
+  DATE_FLAVOR="bsd"
+fi
+
+# Helper: convert a Unix timestamp in SECONDS into a human-readable date string.
+seconds_to_human() {
+  if [[ "$DATE_FLAVOR" == "gnu" ]]; then
+    date -d "@$1" '+%Y-%m-%d %H:%M:%S'
+  else
+    date -r "$1" '+%Y-%m-%d %H:%M:%S'
+  fi
+}
+
+# ----------------------------------------------------------------------------
 # Helper: turn a date into the millisecond timestamp the API requires.
 #   * "MM-DD-YYYY" (e.g. 09-24-2024) is converted to milliseconds.
 #   * A value that is already all digits is treated as a ready-made timestamp
@@ -57,15 +78,22 @@ set -e
 # ----------------------------------------------------------------------------
 to_ms() {
   local value="$1"
-  if [[ "$value" =~ ^[0-9]{2}-[0-9]{2}-[0-9]{4}$ ]]; then
-    # Convert MM-DD-YYYY -> seconds (macOS/BSD date), then to milliseconds. We
-    # pin the time to 00:00:00 so the day always starts at midnight; otherwise
-    # macOS's `date -j` fills in the current time of day.
+  if [[ "$value" =~ ^([0-9]{2})-([0-9]{2})-([0-9]{4})$ ]]; then
+    # Split MM-DD-YYYY into its parts so we can rebuild it in the YYYY-MM-DD
+    # form both `date` versions understand. We pin the time to 00:00:00 so the
+    # day always starts at midnight (otherwise macOS fills in the current time).
+    local mm="${BASH_REMATCH[1]}" dd="${BASH_REMATCH[2]}" yyyy="${BASH_REMATCH[3]}"
+    local iso="${yyyy}-${mm}-${dd} 00:00:00"
     local seconds
-    seconds=$(date -j -f "%m-%d-%Y %H:%M:%S" "$value 00:00:00" "+%s" 2>/dev/null) || {
+    if [[ "$DATE_FLAVOR" == "gnu" ]]; then
+      seconds=$(date -d "$iso" "+%s" 2>/dev/null)
+    else
+      seconds=$(date -j -f "%Y-%m-%d %H:%M:%S" "$iso" "+%s" 2>/dev/null)
+    fi
+    if [[ -z "$seconds" ]]; then
       echo "Error: '$value' is not a valid MM-DD-YYYY date." >&2
       exit 1
-    }
+    fi
     echo "$((seconds * 1000))"
   elif [[ "$value" =~ ^[0-9]+$ ]]; then
     # Already a millisecond timestamp.
@@ -192,7 +220,7 @@ API_URL="https://arctic-shift.photon-reddit.com/api/${ENDPOINT}/search?subreddit
 
 echo "Downloading ${TYPE} from r/${SUBREDDIT}..."
 echo "URL: $API_URL" >&2
-echo "Time range: $(date -r $((AFTER / 1000)) '+%Y-%m-%d %H:%M:%S') to $(date -r $((BEFORE / 1000)) '+%Y-%m-%d %H:%M:%S')" >&2
+echo "Time range: $(seconds_to_human $((AFTER / 1000))) to $(seconds_to_human $((BEFORE / 1000)))" >&2
 echo "" >&2
 
 # Fetch the data with curl. The -H flags are HTTP headers that identify us to
